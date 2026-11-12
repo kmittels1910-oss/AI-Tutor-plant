@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Planter Lab: Fertilizer, Light and Troubleshooting</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{background:#e8efec;color:#12261f;font-family:"Segoe UI",Roboto,system-ui,sans-serif}
+:focus-visible{outline:3px solid #0f766e;outline-offset:2px}
+.b{border:2px solid #12261f;border-radius:8px;padding:.3rem .65rem;background:#fff;font-weight:600}
+.b[aria-pressed=true]{background:#12261f;color:#fff}
+.b:disabled{opacity:.45;cursor:not-allowed}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px #0003;padding:.75rem}
+.m{padding:.45rem .65rem;border-radius:10px;margin:.3rem 0;font-size:.9rem;max-width:92%}
+.m.mentor{background:#dff1ec}.m.you{background:#12261f;color:#fff;margin-left:auto}.m.sys{background:#fdf1d4}
+#report{display:none}
+@media print{#app{display:none!important}#report{display:block!important;color:#000;font-family:Georgia,serif}
+#report table{border-collapse:collapse;width:100%}#report td,#report th{border:1px solid #000;padding:4px;font-size:12px;text-align:left}}
+</style></head>
+<body>
+<div id="app" class="max-w-7xl mx-auto p-3">
+<header class="flex flex-wrap items-center gap-3 mb-3">
+<h1 class="text-2xl font-bold">Planter Lab: Fertilizer, Light and Troubleshooting</h1>
+<label class="ml-auto text-sm">Student name <input id="name" class="border-2 border-slate-700 rounded px-2 py-1 ml-1" autocomplete="name"></label>
+</header>
+<div class="grid lg:grid-cols-[1fr_340px] gap-3">
+<main>
+<section class="card mb-3" aria-label="Lab tools">
+<div class="flex flex-wrap gap-2 items-center"><strong>Dropper:</strong><span id="conc" class="flex gap-1 flex-wrap"></span>
+<strong class="ml-3">Tray:</strong><span id="tools" class="flex gap-1 flex-wrap"></span></div>
+<p id="hint" class="text-sm mt-2" aria-live="polite"></p>
+</section>
+<section class="card mb-3 flex items-center gap-3 flex-wrap">
+<div class="text-xl font-bold" id="wk" aria-live="polite"></div>
+<div class="h-2 w-40 bg-slate-200 rounded" aria-hidden="true"><div id="fill" class="h-2 bg-teal-700 rounded"></div></div>
+<button id="next" class="b ml-auto" data-a="next">Next Week</button><button class="b" data-a="reset">Restart</button>
+</section>
+<div id="pots" class="grid sm:grid-cols-2 gap-3"></div>
+<section class="card mt-3"><h2 class="text-lg font-bold mb-1">Reflection</h2>
+<div id="refl"></div>
+<button id="rep" class="b mt-3 !bg-teal-800 !text-white text-lg" data-a="report" disabled>Generate Lab Report for Canvas</button>
+<p class="text-sm mt-1">Unlocks at Week 6. In the print window choose "Save as PDF", then upload the PDF to Canvas. If printing is blocked inside Canvas, open this page in its own tab.</p>
+</section>
+</main>
+<aside class="card lg:sticky lg:top-3 self-start flex flex-col" style="height:min(82vh,640px)" aria-label="Lab Mentor">
+<h2 class="font-bold text-lg">Lab Mentor</h2>
+<div id="chat" class="flex-1 overflow-y-auto" role="log" aria-live="polite"></div>
+<form id="f" class="flex gap-1 mt-2"><label class="sr-only" for="q">Ask the Lab Mentor</label>
+<input id="q" class="flex-1 border-2 border-slate-700 rounded px-2 py-1" placeholder="Ask for a hint..."><button class="b">Send</button></form>
+</aside>
+</div></div>
+<div id="report"></div>
+<script>
+const PROXY_URL=""; // paste your Cloudflare Worker URL, e.g. "https://lab-mentor.yourname.workers.dev". Empty = built-in mentor only.
+const $=s=>document.querySelector(s);
+const CONC=[[0,'0% Control',0],[5,'5% Low',1],[15,'15% Optimal',3],[40,'40% High/Toxic',8]];
+const TOOLS=[['drop','Dropper'],['neem','Neem Oil Spray'],['water','Watering Can'],['heat','Heat Mat']];
+const HZ={aphids:{t:'Aphid infestation spotted',need:['neem']},vent:{t:'A/C vent blowing cold, dry air: soil drying out rapidly',need:['water','heat']},gnats:{t:'Fungus gnats hovering over the soil (overwatering)',need:['neem']}};
+const Q=[['r1','Hypothesis (write this before Week 1): Which concentration will give the healthiest plant by Week 6, and why?'],
+['r2','Compare roots and shoots in your 0% and 40% pots. What did you observe, and what explains it?'],
+['r3','How did light placement change stem growth? Use evidence from your pots.'],
+['r4','Describe a hazard you troubleshot. What did you notice first, and how did you choose the fix?'],
+['r5','Conclusion: Was your hypothesis supported? What would you test next?']];
+const mk=i=>({id:i+1,u:0,tot:0,maxC:0,light:'sun',h:2,r:3,hp:100,rp:100,dead:false,burn:0,hz:null,res:0,hzN:0,heat:false});
+let S,hist=[];
+$('#refl').innerHTML=Q.map(([id,q])=>`<label class="block font-semibold mt-2" for="${id}">${q}</label><textarea id="${id}" rows="3" class="w-full border-2 border-slate-600 rounded p-2"></textarea>`).join('');
+const esc=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function say(t,w='mentor'){const d=document.createElement('div');d.className='m '+w;d.textContent=t;$('#chat').append(d);$('#chat').scrollTop=1e5;if(w!='you')hist.push({role:'assistant',content:t})}
+function status(p){if(p.dead)return 'dead ('+(p.burn>0?'fertilizer burn':'untreated hazard')+')';const a=[];
+if(S.week>1&&p.u<1.5)a.push('pale yellow, stunted (low nitrogen)');if(p.burn>0)a.push('fertilizer burn: crispy leaf edges, brown roots');
+if(p.light=='shade'&&S.week>1)a.push('leggy, leaning');if(p.hz)a.push(HZ[p.hz.k].t);return a.join('; ')||'healthy'}
+function svg(p){const w=S.week,sh=p.light!='sun',chl=!p.dead&&w>1&&p.u<1.5,bn=p.burn>0;
+const lc=p.dead?'#7c5b3b':bn?'#a38a2f':chl?'#d9d46c':'#3d9a58',H=Math.min(p.h*7,150),L=sh?Math.min(45,H*.35):0,tx=100+L,ty=172-H;
+let s=`<svg viewBox="0 0 200 300" style="height:330px;width:auto;max-width:100%" class="mx-auto" role="img" aria-label="Pot ${p.id}: ${status(p)}">
+<g opacity="${sh?.35:1}"><rect x="146" y="8" width="44" height="40" rx="3" fill="#cfe8f2" stroke="#456" stroke-width="3"/><path d="M168 8v40M146 28h44" stroke="#456" stroke-width="2"/><circle cx="168" cy="28" r="9" fill="#f6c231"/></g>`;
+const dry=p.hz&&p.hz.k=='vent'&&p.hz.left.includes('water');
+s+=`<rect x="40" y="168" width="120" height="122" rx="10" fill="#bfe3ea" fill-opacity=".35" stroke="#5b9fae" stroke-width="3"/><rect x="44" y="172" width="112" height="114" rx="7" fill="${dry?'#b79d77':'#6a4a33'}"/>`;
+if(dry)s+=`<path d="M60 172l8 20-6 14M120 172l-6 24 9 16M95 172l3 18" stroke="#6a4a33" fill="none"/>`;
+if(p.heat)s+=`<rect x="40" y="292" width="120" height="6" rx="3" fill="#d1432d"/>`;
+const d=Math.min(p.r*9,100)*(.35+.65*p.rp/100),rc=p.rp>70?'#f4ecd2':p.rp>40?'#b98b4c':'#4f321b',ok=p.rp>40;
+s+=`<g stroke="${rc}" fill="none" stroke-width="${ok?2.5:1.5}" stroke-linecap="round"><path d="M100 172Q${ok?104:94} ${172+d/2} 100 ${172+d}"/>`;
+for(let k=1;k<=Math.min(5,w);k++){const y=172+d*k/6,l=(18+k*3)*(.4+.6*p.rp/100);s+=`<path d="M100 ${y}q${-l/2} 6 ${-l} ${ok?18:6}M100 ${y+4}q${l/2} 6 ${l} ${ok?18:6}"/>`}
+s+='</g>';
+s+=p.dead?`<path d="M100 172Q100 ${ty+20} 140 ${ty+60}" stroke="#6b5030" stroke-width="5" fill="none"/>`:`<path d="M100 172Q100 ${(172+ty)/2} ${tx} ${ty}" stroke="#2f7d46" stroke-width="${sh?3:5}" fill="none" stroke-linecap="round"/><circle cx="${tx}" cy="${ty}" r="5" fill="${lc}"/>`;
+const n=p.dead?3:Math.min(6,Math.floor(p.h/3)+1),rot=p.dead?75:28,rx=(sh?9:14)*(p.dead?.8:1);
+for(let k=1;k<=n;k++){const t=k/(n+1),y=172-(172-ty)*t,x=100+L*t*t,e=`rx="${rx}" ry="5" fill="${lc}" stroke="${bn||p.dead?'#5a3410':'none'}" stroke-dasharray="2 2"`;
+s+=`<ellipse cx="${x-rx}" cy="${y}" ${e} transform="rotate(${-rot} ${x} ${y})"/><ellipse cx="${x+rx}" cy="${y}" ${e} transform="rotate(${rot} ${x} ${y})"/>`}
+const z=p.hz&&p.hz.k;
+if(z=='aphids')for(let k=0;k<7;k++)s+=`<circle cx="${tx-14+k*5}" cy="${ty+10+(k%3)*12}" r="2.2" fill="#6b8e23" stroke="#222" stroke-width=".6"/>`;
+if(z=='gnats')for(let k=0;k<5;k++)s+=`<circle cx="${60+k*20}" cy="${150-(k%2)*16}" r="2" fill="#222"/>`;
+if(z=='vent')s+=`<path d="M0 90q10-8 20 0t20 0M0 110q10-8 20 0t20 0" stroke="#4aa3d8" fill="none" stroke-width="3"/><text x="2" y="78" font-size="11" fill="#1d6fa5">A/C</text>`;
+if(sh)s+=`<rect width="200" height="300" fill="#102030" opacity=".22" pointer-events="none"/>`;
+return s+'</svg>'}
+function render(){$('#wk').textContent=`Week ${S.week} of 6`;$('#fill').style.width=(S.week/6*100)+'%';
+$('#next').disabled=S.week>=6;$('#rep').disabled=S.week<6;
+$('#conc').innerHTML=CONC.map(c=>`<button class="b" data-a="conc" data-i="${c[0]}" aria-pressed="${S.tool=='drop'&&S.c==c[0]}">${c[1]}</button>`).join('');
+$('#tools').innerHTML=TOOLS.slice(1).map(t=>`<button class="b" data-a="tool" data-i="${t[0]}" aria-pressed="${S.tool==t[0]}">${t[1]}</button>`).join('');
+const u=CONC.find(c=>c[0]==S.c)[2];
+$('#hint').textContent=S.tool=='drop'?`Dropper: ${S.c}% fertilizer, ${u} unit${u==1?'':'s'} per drop. Click a pot to apply.`:`${TOOLS.find(t=>t[0]==S.tool)[1]} selected. Click a pot that needs it.`;
+$('#pots').innerHTML=S.pots.map((p,i)=>`<div class="card"><div class="flex justify-between items-center"><h2 class="font-bold">Pot ${p.id}</h2>
+<button class="b text-sm" data-a="light" data-i="${i}">${p.light=='sun'?'Sunny Window':'Shady Corner'}</button></div>
+<button class="block w-full" data-a="pot" data-i="${i}" aria-label="Apply selected tool to Pot ${p.id}">${svg(p)}</button>
+<dl class="grid grid-cols-2 text-sm gap-x-2"><dt>Total fertilizer</dt><dd class="font-semibold">${p.tot} units</dd><dt>Height</dt><dd class="font-semibold">${p.h.toFixed(1)} cm</dd>
+<dt>Root health</dt><dd class="font-semibold">${Math.round(p.rp)}%</dd><dt>Hazards fixed</dt><dd class="font-semibold">${p.res} of ${p.hzN}</dd></dl>
+<p class="text-sm mt-1"><b>Status:</b> ${status(p)}</p>
+${p.hz?`<p class="mt-2 text-sm font-semibold text-amber-900 bg-amber-100 rounded p-2">Hazard: ${HZ[p.hz.k].t}</p>`:''}</div>`).join('')}
+function apply(i){const p=S.pots[i],t=S.tool;
+if(p.dead)return say(`Pot ${p.id} has died. Examine its roots and leaves: what do they say about what happened?`);
+if(t=='drop'){const u=CONC.find(c=>c[0]==S.c)[2];p.u+=u;p.tot+=u;p.maxC=Math.max(p.maxC,S.c);
+if(S.c==40)say(`I noticed you put 40% concentration in Pot ${p.id}. Watch the root tips closely next week. How might osmotic pressure affect them?`);
+else if(p.u>7)say(`Pot ${p.id} now holds ${p.u.toFixed(1)} units in the soil. Does more fertilizer always help?`)}
+else if(p.hz&&p.hz.left.includes(t)){p.hz.left=p.hz.left.filter(x=>x!=t);if(t=='heat')p.heat=true;
+if(p.hz.left.length)say(`Good first step on Pot ${p.id}. Is the problem completely solved, or is something still affecting the plant?`);
+else{p.res++;p.hz=null;say(`Pot ${p.id} is treated. What will you look for next week to confirm the fix worked?`)}}
+else say(`That tool doesn't match a problem on Pot ${p.id}. What symptoms are you actually seeing there?`);
+render();document.querySelector(`[data-a=pot][data-i="${i}"]`).focus()}
+function issues(){const o=[];S.pots.forEach(p=>{const n='Pot '+p.id;
+if(p.dead)return o.push([1,`${n} didn't survive. What do its roots and leaves suggest about the cause?`]);
+if(p.hz){const k=p.hz.k;o.push([5,k=='aphids'?`${n}: something is clustered on the new growth. What is it, and which tray item deals with it without harming the roots?`:k=='vent'?`${n}: the soil is cracking and the air feels different. Which two conditions changed, and which tools address each?`:`${n}: small flies are over wet soil. What does that say about moisture, and what treats larvae living in soil?`])}
+if(p.u>7||p.burn>0)o.push([4,p.u>7?`${n} holds ${p.u.toFixed(1)} units. What happens to water uptake when the soil solution is more concentrated than the root cells?`:`${n}'s root tips are damaged. Which dose could cause that, and would more fertilizer repair it?`]);
+if(S.week>1&&p.u<1.5)o.push([3,`${n}'s new leaves are pale and growth is slow. Which nutrient is mobile enough to leave old leaves first, and how much has this pot received?`]);
+if(p.light=='shade'&&S.week>1)o.push([3,`${n} is stretching in the Shady Corner. What is the stem reaching for, and is that growth strong? Compare with a sunny pot.`])});
+return o.sort((a,b)=>b[0]-a[0]).map(x=>x[1])}
+const tips=()=>{const t=issues();return (t.slice(0,2).join(' ')||'All pots look stable. What does your hypothesis predict for Week 6, and which pot is your control?')+(S.week>=6?' Your data are complete: finish the reflection and generate your report.':'')};
+function heur(m){m=m.toLowerCase();
+if(/answer|just tell|solution/.test(m))return "I won't hand over the answer, but I'll help you reason it out. "+tips();
+if(/yellow|pale|chlor/.test(m))return "Pale new growth is a clue. What does a plant use nitrogen for, and which pots have received little or none? How do the roots in those pots compare?";
+if(/root|brown|burn|shrivel/.test(m))return "Compare root color and length across pots. What is the relationship between dose, soil concentration, and water entering root cells?";
+if(/light|shade|lean|tall|leggy/.test(m))return "Compare stem thickness, height and leaf size between sunny and shady pots. Why might a plant invest in height when light is scarce?";
+if(/aphid|pest|gnat|vent|dry|hazard/.test(m))return issues().filter((_,i)=>i<2).join(' ')||"No active hazard right now. What would you inspect each week to catch one early?";
+return tips()}
+const snap=()=>({week:S.week,pots:S.pots.map(p=>({pot:p.id,fertilizer_units_total:p.tot,units_in_soil:+p.u.toFixed(1),highest_concentration_pct:p.maxC,light:p.light=='sun'?'Sunny Window':'Shady Corner',active_pest_or_hazard:p.hz?p.hz.k:null,tools_still_needed:p.hz?p.hz.left:[],hazards_resolved:p.res,height_cm:+p.h.toFixed(1),root_health_pct:Math.round(p.rp),plant_health_pct:Math.round(p.hp),status:status(p)}))});
+async function llm(msg){const r=await fetch(PROXY_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,state:snap(),history:hist.slice(-6)})});
+if(!r.ok)throw new Error(r.status);return (await r.json()).reply}
+async function ask(msg){say(msg,'you');
+if(PROXY_URL){try{const a=await llm(msg);hist.push({role:'user',content:msg});return say(a)}catch(e){say('The live mentor is offline, so I am using my built-in hints.','sys')}}
+hist.push({role:'user',content:msg});say(heur(msg))}
+function spawn(){if(Math.random()>.85)return;const c=S.pots.filter(p=>!p.dead&&!p.hz);if(!c.length)return;
+const p=c[Math.random()*c.length|0],k=Object.keys(HZ)[Math.random()*3|0];p.hz={k,left:[...HZ[k].need]};p.hzN++;
+say(`Lab alert: ${HZ[k].t}, Pot ${p.id}. Inspect it before choosing a tool.`,'sys')}
+function next(){if(S.week>=6)return;
+S.pots.forEach(p=>{if(p.dead)return;const u=p.u,f=u<1.5?.35:u<3?.7:u<=7?1:u<=10?.55:0,salt=Math.max(0,u-7),sh=p.light!='sun',z=p.hz&&p.hz.k;
+p.h+=4.5*f*(sh?1.4:1);p.r+=3*Math.max(f,.15)*p.rp/100;
+if(u<1.5)p.hp-=6;if(sh)p.hp-=4;
+if(salt){p.hp-=salt*4;p.rp-=salt*8+(salt>4?20:0);p.burn=Math.max(p.burn,salt)}
+if(z=='aphids'||z=='vent')p.hp-=12;if(z=='gnats'){p.hp-=6;p.rp-=12}
+p.hp=Math.max(0,p.hp);p.rp=Math.max(0,p.rp);p.u*=.7;
+if(p.hp<=0||p.rp<=0){p.dead=true;say(`Pot ${p.id} did not survive the week. What do its roots tell you?`,'sys')}});
+S.week++;if(S.week<=5)spawn();render();say(`Week ${S.week} begins. ${tips()}`)}
+function init(){S={week:1,tool:'drop',c:15,pots:[0,1,2,3].map(mk)};hist=[];$('#chat').innerHTML='';render();
+say("Hi, I'm your Lab Mentor. I'll ask questions rather than hand out answers. Write your hypothesis below before you start dosing, then apply fertilizer and advance the weeks.")}
+function report(){const nm=$('#name').value.trim();if(!nm){$('#name').focus();return alert('Please enter your name first.')}
+const rows=S.pots.map(p=>`<tr><td>Pot ${p.id}</td><td>${p.light=='sun'?'Sunny Window':'Shady Corner'}</td><td>${p.h.toFixed(1)}</td><td>${Math.round(p.rp)}%</td><td>${p.tot}</td><td>${p.maxC}%</td><td>${p.res} of ${p.hzN}</td><td>${esc(status(p))}</td></tr>`).join('');
+$('#report').innerHTML=`<h1>Planter Lab Report</h1><p><b>Student:</b> ${esc(nm)} &nbsp; <b>Date:</b> ${new Date().toLocaleDateString()} &nbsp; <b>Simulation:</b> Week 6 of 6</p>
+<table><tr><th>Pot</th><th>Final light</th><th>Height (cm)</th><th>Root health</th><th>Total fertilizer (units)</th><th>Highest conc.</th><th>Hazards resolved</th><th>Final status</th></tr>${rows}</table>
+<h2>Reflection</h2>${Q.map(([id,q])=>`<h3>${q}</h3><p style="white-space:pre-wrap">${esc($('#'+id).value)||'(no response)'}</p>`).join('')}`;window.print()}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,i=b.dataset.i;
+if(a=='conc'){S.tool='drop';S.c=+i;render()}
+else if(a=='tool'){S.tool=i;render()}
+else if(a=='pot')apply(+i);
+else if(a=='light'){const p=S.pots[+i];if(p.dead)return;p.light=p.light=='sun'?'shade':'sun';render();
+say(p.light=='shade'?`Pot ${p.id} is now in the Shady Corner. What do you predict will happen to its stem and leaves by next week?`:`Pot ${p.id} is back in the Sunny Window. How will you tell whether it recovers?`)}
+else if(a=='next')next();else if(a=='reset'){if(confirm('Restart the simulation?'))init()}else if(a=='report')report()});
+$('#f').addEventListener('submit',e=>{e.preventDefault();const v=$('#q').value.trim();if(v){$('#q').value='';ask(v)}});
+init();
+</script></body></html>
